@@ -23,10 +23,10 @@ mqtt:
       name: "WS2812-Clock"
       state_topic: "home/office/ws2812-clock/state"
       command_topic: "home/office/ws2812-clock/set"
-      payload_on: "CLOCK_ON"
-      payload_off: "CLOCK_OFF"
-      state_on: "CLOCK_ON"
-      state_off: "CLOCK_OFF"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
       optimistic: false
       qos: 0
       retain: true
