@@ -1,4 +1,11 @@
 #include <configuration.h>
+#include <PubSubClient.h>
+
+void LocalMQTTCallback(char* p_topic, byte* p_payload, unsigned int p_length);
+
+extern boolean ClockOn;
+
+extern PubSubClient LocalMQTTClient;
 
 WiFiManager wifiManager;
 
@@ -44,6 +51,26 @@ void Configuration::setupWifiPortal(String hostName, bool configPortal)
     WiFiManagerParameter custom_maxmilliamp("maxmilliamp", "max. mA", maxmilliamp.c_str(), 5);
     wifiManager.addParameter(&custom_maxmilliamp);
 
+    WiFiManagerParameter custom_MQTTHost("MQTTServer", "MQTT Server", LocalMQTTHost.c_str(), 20);
+    wifiManager.addParameter(&custom_MQTTHost);
+
+    WiFiManagerParameter custom_MQTTUser("MQTTUser", "MQTT User", LocalMQTTUser.c_str(), 30);
+    wifiManager.addParameter(&custom_MQTTUser);
+
+    WiFiManagerParameter custom_MQTTPassword("MQTTPassword", "MQTT Password");
+    wifiManager.addParameter(&custom_MQTTPassword);
+    if(LocalMQTTPassword != "")
+    {
+        custom_MQTTPassword.setValue("***", 30);    
+    }
+    else
+    {
+        custom_MQTTPassword.setValue("", 30);  
+    }
+
+    WiFiManagerParameter custom_MQTTTopic("MQTTTopic", "MQTT Topic", LocalMQTTTopic.c_str(), 50);
+    wifiManager.addParameter(&custom_MQTTTopic);
+
     char _custom_checkbox_master[32] = "type=\"checkbox\"";
 
     if(isMaster)
@@ -53,7 +80,6 @@ void Configuration::setupWifiPortal(String hostName, bool configPortal)
 
     WiFiManagerParameter custom_checkbox_is_master("ismaster", "Master", "T", 2, _custom_checkbox_master, WFM_LABEL_AFTER);
     wifiManager.addParameter(&custom_checkbox_is_master);
-
 
     wifiManager.setSaveConfigCallback(saveConfigCallback);
     wifiManager.setSaveParamsCallback(saveParamsCallback);
@@ -86,6 +112,32 @@ void Configuration::setupWifiPortal(String hostName, bool configPortal)
     universe = custom_universe.getValue();
     maxmilliamp = custom_maxmilliamp.getValue();
     isMaster = (strncmp(custom_checkbox_is_master.getValue(), "T", 1) == 0);
+    LocalMQTTHost = custom_MQTTHost.getValue();
+    LocalMQTTUser = custom_MQTTUser.getValue();
+    LocalMQTTTopic = custom_MQTTTopic.getValue();
+
+    LocalMQTTCommandTopic = LocalMQTTTopic + "set";
+    LocalMQTTStateTopic = LocalMQTTTopic + "state";
+
+    //MQTT Connection (Check) need to be done regardless if Portal was entered or not
+    if(LocalMQTTHost != "" && LocalMQTTUser != "" && LocalMQTTTopic != "")
+    {
+        LocalMQTTClient.setServer(LocalMQTTHost.c_str(), 1883);
+        LocalMQTTClient.setCallback(LocalMQTTCallback);
+
+        LocalMQTTEnabled = true;
+        Serial.println("MQTT Enabled");
+    }
+    else
+    {
+        Serial.println("No or incomplete MQTT config, no connection will be established");
+    }
+
+    //Save value only, if not unchanged asterisks inside
+    if(String(custom_MQTTPassword.getValue()) != "***")
+    {
+        LocalMQTTPassword = custom_MQTTPassword.getValue();
+    }
 
     if((universe.toInt() < 1) || (universe.toInt() > 255))
     {
@@ -130,7 +182,33 @@ void Configuration::connectionGuard()
         //server.begin();
         Serial.println(" connected.");
         Serial.println(WiFi.localIP());
-    }       
+    }
+
+    //MQTT Connection
+    while (!LocalMQTTClient.connected() && LocalMQTTEnabled == true)
+    {
+        Serial.println("INFO: Attempting MQTT connection...");
+        // Attempt to connect
+        if (LocalMQTTClient.connect(LOCAL_MQTT_CLIENT_ID, LocalMQTTUser.c_str(), LocalMQTTPassword.c_str()))
+        {
+            Serial.println("INFO: connected");
+
+            // Once connected, publish an announcement...
+            // publish the initial values
+            LocalMQTTClient.publish(LocalMQTTStateTopic.c_str(), "CLOCK_ON", true);
+
+            // ... and resubscribe
+            LocalMQTTClient.subscribe(LocalMQTTCommandTopic.c_str());
+        }
+        else
+        {
+            Serial.print("ERROR: failed, rc=");
+            Serial.print(LocalMQTTClient.state());
+            Serial.println("DEBUG: try again in 5 seconds");
+            // Wait 5 seconds before retrying
+            delay(5000);
+        }
+    }
 }
 
 void Configuration::save()
@@ -143,6 +221,10 @@ void Configuration::save()
     json["universe"] = universe;
     json["maxmilliamp"] = maxmilliamp;
     json["is_master"] = isMaster;
+    json["local_mqtthost"] = LocalMQTTHost;
+    json["local_mqttuser"] = LocalMQTTUser;
+    json["local_mqttpassword"] = LocalMQTTPassword;
+    json["local_mqtttopic"] = LocalMQTTTopic;
 
     File configFile = SPIFFS.open("/config.json", "w");
     if (!configFile)
@@ -190,6 +272,26 @@ void Configuration::setupSPIFF()
                     String strUniverse = json["universe"];
                     String strMaxmilliamp = json["maxmilliamp"];
                     bool ismaster = json["is_master"];
+                    String strMQTTHost = json["local_mqtthost"];
+                    String strMQTTUser = json["local_mqttuser"];
+                    String strMQTTPassword = json["local_mqttpassword"];
+                    String strMQTTTopic = json["local_mqtttopic"];
+
+                    //Config values can be read out, then take them over, if not initialize them as empty
+                    if(json.containsKey("local_mqtthost") == true && json.containsKey("local_mqttuser") == true && json.containsKey("local_mqttpassword") == true && json.containsKey("local_mqtttopic") == true)
+                    {
+                        LocalMQTTHost = strMQTTHost;
+                        LocalMQTTUser = strMQTTUser;
+                        LocalMQTTPassword = strMQTTPassword;
+                        LocalMQTTTopic = strMQTTTopic;
+                    }
+                    else
+                    {
+                        LocalMQTTHost = "";
+                        LocalMQTTUser = "";
+                        LocalMQTTPassword = "";
+                        LocalMQTTTopic = "";
+                    }
 
                     mqttHost = host;
                     mqttUser = user;
@@ -205,6 +307,9 @@ void Configuration::setupSPIFF()
                     Serial.printf(" Universe:\t %s\n", universe.c_str());
                     Serial.printf(" max mA:\t %s\n", maxmilliamp.c_str());
                     Serial.printf(" is_master:\t %d\n", isMaster);
+                    Serial.printf(" Local MQTT Host:\t %s\n", LocalMQTTHost.c_str());
+                    Serial.printf(" Local MQTT User:\t %s\n", LocalMQTTUser.c_str());
+                    Serial.printf(" Local MQTT Topic:\t %s\n", LocalMQTTTopic.c_str());
                 }
                 else
                 {

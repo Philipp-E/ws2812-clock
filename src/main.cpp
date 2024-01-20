@@ -2,7 +2,6 @@
 #include <settings.h>
 #include <configuration.h>
 #include <ArduinoOTA.h>
-#include <Time.h>
 #include <FastLED.h>
 #include <ESPAsyncE131.h>
 #include <ESPNtpClient.h>
@@ -24,12 +23,15 @@
 #define FX_MODE_TIMEOUT_MS (60 * 1000)
 #define MULTICAST_MODE_TIMEOUT_MS 2000
 
+//Flag, whether clock is on or not (Can be controlled via MQTT if enabled)
+boolean ClockOn = true;
 
 extern Configuration config;
 ESPAsyncE131 e131(UNIVERSE_COUNT);
 
 WiFiClient psWiFiClient;
 PubSubClient psClient(psWiFiClient);
+PubSubClient LocalMQTTClient(psWiFiClient);
 BeatInfo beatInfo;
 
 bool fxMode = false;
@@ -56,7 +58,35 @@ void printVersionInfo();
 void printConfigStatus();
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void mqttReconnect();
+void LocalMQTTCallback(char* p_topic, byte* p_payload, unsigned int p_length);
 
+void LocalMQTTCallback(char* p_topic, byte* p_payload, unsigned int p_length)
+{
+  // concat the payload into a string
+  String payload;
+  for (uint8_t i = 0; i < p_length; i++)
+  {
+      payload.concat((char)p_payload[i]);
+  }
+
+  // handle message topic
+  if (config.getLocalMQTTCommandTopic().equals(p_topic))
+  {
+    // test if the payload is equal to "ON" or "OFF"
+    if (payload.equals("ON"))
+    {
+      ClockOn = true;
+      LocalMQTTClient.publish(config.getLocalMQTTStateTopic(), "ON", true);
+      Serial.println("Switched Clock on");
+    }
+    else if (payload.equals("OFF"))
+    {
+      ClockOn = false;
+      LocalMQTTClient.publish(config.getLocalMQTTStateTopic(), "OFF", true);
+      Serial.println("Switched Clock off");
+    }
+  }
+}
 
 void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
@@ -593,5 +623,14 @@ void loop()
     mqttReconnect();
   
   psClient.loop();
-  draw();
+  LocalMQTTClient.loop();
+
+  if(ClockOn == true)
+  {
+    draw();
+  }
+  else
+  {
+    FastLED.clear(true);
+  }
 }

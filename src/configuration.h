@@ -18,6 +18,8 @@
 #define MQTT_USER "user"
 #define MQTT_PASSWORD "password"
 
+#define LOCAL_MQTT_CLIENT_ID "WS2812Clock"
+
 
 
 class Configuration
@@ -31,6 +33,8 @@ public:
     const char *getMQTTHost() { return mqttHost.c_str(); };
     const char *getMQTTUser() { return mqttUser.c_str(); };
     const char *getMQTTPassword() { return mqttPassword.c_str(); };
+    const String getLocalMQTTCommandTopic() { return LocalMQTTCommandTopic; };
+    const char *getLocalMQTTStateTopic() { return LocalMQTTStateTopic.c_str(); };
 
 
 private:
@@ -40,6 +44,13 @@ private:
     String mqttUser = MQTT_USER;
     String mqttPassword = MQTT_PASSWORD;
     bool isMaster = false;
+    String LocalMQTTHost = "";
+    String LocalMQTTUser = "";
+    String LocalMQTTPassword = "";
+    String LocalMQTTTopic;
+    String LocalMQTTStateTopic;
+    String LocalMQTTCommandTopic;
+    boolean LocalMQTTEnabled = false;
 
     void save();
     void setupSPIFF();
